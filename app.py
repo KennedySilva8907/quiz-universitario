@@ -19,12 +19,11 @@ with st.sidebar:
     
     st.divider() 
     
-    # 1. Seletor de Modelo (MANTIDO COMO PEDISTE)
+    # 1. Seletor de Modelo
     modelo_escolhido = st.selectbox(
         "Modelo da IA", 
         ["gemini-2.5-flash", "gemini-2.5-pro"],
-        index=0,
-        help="O Flash é mais rápido. Usa o Pro se quiseres raciocínio mais complexo."
+        index=0
     )
     
     # 2. Nível de Dificuldade
@@ -34,22 +33,20 @@ with st.sidebar:
         index=1
     )
     
-    # 3. Quantidade de Perguntas
-    qtd_perguntas = st.slider(
-        "Número de Perguntas",
-        min_value=3,
-        max_value=20,
-        value=5,
-        step=1
+    # 3. Tipos de Perguntas (NOVO!)
+    tipos_perguntas = st.multiselect(
+        "Tipos de Perguntas (Seleciona pelo menos um)",
+        ["Múltipla Escolha", "Verdadeiro ou Falso", "Associação de Colunas"],
+        default=["Múltipla Escolha", "Verdadeiro ou Falso"]
     )
+    
+    # 4. Quantidade de Perguntas
+    qtd_perguntas = st.slider("Número de Perguntas", 3, 20, 5)
 
-    # 4. Número de Alternativas (NOVO!)
+    # 5. Número de Alternativas (Só afeta Múltipla Escolha)
     num_alternativas = st.slider(
-        "Número de Opções (A, B, C...)",
-        min_value=3,
-        max_value=6,
-        value=4,
-        help="Escolhe quantas opções de resposta queres por pergunta."
+        "Opções (apenas para Múltipla Escolha)",
+        3, 6, 4
     )
 
 # --- Funções de Leitura de Ficheiros ---
@@ -76,10 +73,9 @@ def ler_docx(file):
 st.subheader("1. Carregar Material")
 uploaded_file = st.file_uploader("Arrasta o teu ficheiro aqui", type=['pdf', 'pptx', 'docx'])
 
-# 5. Campo de Foco no Tema
 tema_foco = st.text_input(
     "Queres focar num tema específico? (Opcional)",
-    placeholder="Ex: Foca-te apenas nas datas históricas ou no Capítulo 2"
+    placeholder="Ex: Foca-te apenas nas datas históricas"
 )
 
 if uploaded_file is not None and api_key:
@@ -93,35 +89,51 @@ if uploaded_file is not None and api_key:
         elif uploaded_file.name.endswith('.docx'):
             texto_extraido = ler_docx(uploaded_file)
         
-        st.info(f"📄 Ficheiro carregado! ({len(texto_extraido)} caracteres encontrados)")
+        st.info(f"📄 Ficheiro carregado! ({len(texto_extraido)} caracteres)")
         
-        # Botão para gerar
-        if st.button("🚀 Gerar Quiz Personalizado", type="primary"):
-            with st.spinner("A IA está a ler e a criar as perguntas..."):
+        # Validação para garantir que o user escolheu pelo menos um tipo
+        if not tipos_perguntas:
+            st.warning("⚠️ Por favor seleciona pelo menos um tipo de pergunta na barra lateral.")
+        
+        elif st.button("🚀 Gerar Quiz Personalizado", type="primary"):
+            with st.spinner("A IA está a criar perguntas variadas..."):
                 
-                # Configurar Gemini
                 genai.configure(api_key=api_key)
                 model = genai.GenerativeModel(modelo_escolhido)
 
-                # --- PROMPT ATUALIZADO COM NÚMERO DE OPÇÕES ---
+                # --- PROMPT INTELIGENTE PARA VÁRIOS TIPOS ---
                 prompt = f"""
                 Atua como um professor universitário. Cria um quiz baseado neste texto:
                 "{texto_extraido[:40000]}"
                 
-                CONFIGURAÇÕES:
-                - Quantidade: EXATAMENTE {qtd_perguntas} perguntas.
+                CONFIGURAÇÕES GERAIS:
+                - Quantidade Total: {qtd_perguntas} perguntas.
                 - Dificuldade: {dificuldade}.
                 - Foco: {tema_foco if tema_foco else "Geral"}.
-                - Número de Opções por pergunta: EXATAMENTE {num_alternativas} opções.
                 
-                REGRAS DE JSON (OBRIGATÓRIO):
-                Devolve APENAS um JSON com esta estrutura.
-                As opções devem ir de A) até à letra correspondente (ex: se forem 5 opções, vai até E).
+                TIPOS DE PERGUNTAS PERMITIDOS (Mistura estes tipos):
+                {', '.join(tipos_perguntas)}
                 
+                REGRAS DE FORMATAÇÃO POR TIPO:
+                
+                1. SE FOR "Múltipla Escolha":
+                   - Cria {num_alternativas} opções (A, B, C...).
+                
+                2. SE FOR "Verdadeiro ou Falso":
+                   - A pergunta deve ser uma afirmação.
+                   - As opções DEVEM ser APENAS: ["A) Verdadeiro", "B) Falso"].
+                
+                3. SE FOR "Associação de Colunas":
+                   - Na 'pergunta', escreve os itens para associar (ex: "Associe: 1-X, 2-Y...").
+                   - Nas 'opcoes', coloca as sequências possíveis (ex: "A) 1-B, 2-A", "B) 1-A, 2-B").
+                
+                ESTRUTURA JSON OBRIGATÓRIA:
+                Devolve APENAS um JSON válido:
                 [
                     {{
-                        "pergunta": "...",
-                        "opcoes": ["A) ...", "B) ...", "C) ...", ...],
+                        "tipo": "Tipo da pergunta aqui",
+                        "pergunta": "Texto da pergunta...",
+                        "opcoes": ["A) ...", "B) ..."],
                         "resposta_correta": "A",
                         "explicacao": "..."
                     }}
@@ -129,16 +141,13 @@ if uploaded_file is not None and api_key:
                 """
                 
                 try:
-                    # Tenta o modo JSON nativo
                     try:
                         response = model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
                     except:
-                        # Se falhar, tenta normal
                         response = model.generate_content(prompt)
 
                     texto_bruto = response.text
                     
-                    # Limpeza para garantir que só apanha o JSON
                     inicio = texto_bruto.find('[')
                     fim = texto_bruto.rfind(']') + 1
 
@@ -146,13 +155,12 @@ if uploaded_file is not None and api_key:
                         json_str = texto_bruto[inicio:fim]
                         st.session_state['quiz_data'] = json.loads(json_str)
                         
-                        # Limpa respostas antigas
                         for key in list(st.session_state.keys()):
                             if key.startswith('q_'):
                                 del st.session_state[key]
                         st.rerun()
                     else:
-                        st.error("A IA não devolveu o formato correto. Tenta outra vez.")
+                        st.error("Erro no formato. Tenta novamente.")
 
                 except Exception as e:
                     st.error(f"Erro na API: {e}")
@@ -169,10 +177,14 @@ if 'quiz_data' in st.session_state:
     total = len(st.session_state['quiz_data'])
     
     for i, q in enumerate(st.session_state['quiz_data']):
+        # Mostra o tipo de pergunta (pequena etiqueta)
+        tipo_label = q.get('tipo', 'Pergunta')
+        st.caption(f"📌 {tipo_label}")
+        
         st.markdown(f"**{i+1}. {q['pergunta']}**")
         
         escolha = st.radio(
-            "Opções:", 
+            "A tua resposta:", 
             q['opcoes'], 
             key=f"q_{i}", 
             index=None,
