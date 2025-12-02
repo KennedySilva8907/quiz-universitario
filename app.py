@@ -19,7 +19,7 @@ with st.sidebar:
     
     st.divider() 
     
-    # 1. Seletor de Modelo
+    # 1. Seletor de Modelo (MANTIDO COMO PEDISTE)
     modelo_escolhido = st.selectbox(
         "Modelo da IA", 
         ["gemini-2.5-flash", "gemini-2.5-pro"],
@@ -27,20 +27,29 @@ with st.sidebar:
         help="O Flash é mais rápido. Usa o Pro se quiseres raciocínio mais complexo."
     )
     
-    # 2. Nível de Dificuldade (NOVO)
+    # 2. Nível de Dificuldade
     dificuldade = st.selectbox(
         "Nível de Dificuldade",
         ["Fácil (Memorização)", "Médio (Aplicação)", "Difícil (Análise Crítica)"],
         index=1
     )
     
-    # 3. Quantidade de Perguntas (NOVO)
+    # 3. Quantidade de Perguntas
     qtd_perguntas = st.slider(
         "Número de Perguntas",
         min_value=3,
         max_value=20,
         value=5,
         step=1
+    )
+
+    # 4. Número de Alternativas (NOVO!)
+    num_alternativas = st.slider(
+        "Número de Opções (A, B, C...)",
+        min_value=3,
+        max_value=6,
+        value=4,
+        help="Escolhe quantas opções de resposta queres por pergunta."
     )
 
 # --- Funções de Leitura de Ficheiros ---
@@ -67,7 +76,7 @@ def ler_docx(file):
 st.subheader("1. Carregar Material")
 uploaded_file = st.file_uploader("Arrasta o teu ficheiro aqui", type=['pdf', 'pptx', 'docx'])
 
-# 4. Campo de Foco no Tema (NOVO)
+# 5. Campo de Foco no Tema
 tema_foco = st.text_input(
     "Queres focar num tema específico? (Opcional)",
     placeholder="Ex: Foca-te apenas nas datas históricas ou no Capítulo 2"
@@ -94,7 +103,7 @@ if uploaded_file is not None and api_key:
                 genai.configure(api_key=api_key)
                 model = genai.GenerativeModel(modelo_escolhido)
 
-                # --- PROMPT COM AS NOVAS FUNCIONALIDADES ---
+                # --- PROMPT ATUALIZADO COM NÚMERO DE OPÇÕES ---
                 prompt = f"""
                 Atua como um professor universitário. Cria um quiz baseado neste texto:
                 "{texto_extraido[:40000]}"
@@ -103,13 +112,16 @@ if uploaded_file is not None and api_key:
                 - Quantidade: EXATAMENTE {qtd_perguntas} perguntas.
                 - Dificuldade: {dificuldade}.
                 - Foco: {tema_foco if tema_foco else "Geral"}.
+                - Número de Opções por pergunta: EXATAMENTE {num_alternativas} opções.
                 
                 REGRAS DE JSON (OBRIGATÓRIO):
-                Devolve APENAS um JSON com esta estrutura, sem texto antes ou depois:
+                Devolve APENAS um JSON com esta estrutura.
+                As opções devem ir de A) até à letra correspondente (ex: se forem 5 opções, vai até E).
+                
                 [
                     {{
                         "pergunta": "...",
-                        "opcoes": ["A) ...", "B) ...", "C) ...", "D) ..."],
+                        "opcoes": ["A) ...", "B) ...", "C) ...", ...],
                         "resposta_correta": "A",
                         "explicacao": "..."
                     }}
@@ -134,7 +146,7 @@ if uploaded_file is not None and api_key:
                         json_str = texto_bruto[inicio:fim]
                         st.session_state['quiz_data'] = json.loads(json_str)
                         
-                        # Limpa respostas antigas para não misturar
+                        # Limpa respostas antigas
                         for key in list(st.session_state.keys()):
                             if key.startswith('q_'):
                                 del st.session_state[key]
