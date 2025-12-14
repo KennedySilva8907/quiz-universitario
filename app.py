@@ -1,5 +1,5 @@
 import streamlit as st
-from groq import Groq  # Mudança aqui: Importar Groq
+from groq import Groq
 import pypdf
 from pptx import Presentation
 import docx2txt
@@ -8,21 +8,21 @@ import json
 # --- Configuração da Página ---
 st.set_page_config(page_title="Gerador de Quizzes Universitário", page_icon="🎓", layout="centered")
 
-st.title("🎓 Estuda com IA: Gerador de Quizzes (Groq Edition)")
+st.title("🎓 Estuda com IA: Gerador de Quizzes (Groq)")
 st.write("Carrega os materiais da aula e personaliza o teu teste.")
 
 # --- Barra Lateral para Configuração ---
 with st.sidebar:
     st.header("⚙️ Configurações")
     
-    # Pré-preenchi com a tua chave, mas deixei editável
+    # A tua chave já está aqui pré-preenchida
     default_key = "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"
     api_key = st.text_input("Insere a tua API Key da Groq", value=default_key, type="password")
     st.markdown("[Obter Chave Gratuita](https://console.groq.com/keys)")
     
     st.divider() 
     
-    # 1. Seletor de Modelo (Atualizado para modelos Groq)
+    # 1. Seletor de Modelo (Modelos rápidos da Groq)
     modelo_escolhido = st.selectbox(
         "Modelo da IA", 
         ["llama-3.3-70b-versatile", "llama3-70b-8192", "mixtral-8x7b-32768"],
@@ -38,7 +38,7 @@ with st.sidebar:
     
     # 3. Tipos de Perguntas
     tipos_perguntas = st.multiselect(
-        "Tipos de Perguntas (Seleciona pelo menos um)",
+        "Tipos de Perguntas",
         ["Múltipla Escolha", "Verdadeiro ou Falso", "Associação de Colunas"],
         default=["Múltipla Escolha", "Verdadeiro ou Falso"]
     )
@@ -134,7 +134,8 @@ if uploaded_file is not None and api_key:
                 }}
                 """
                 
-                prompt_usuario = f"Texto base para o quiz: {texto_extraido[:30000]}" # Limite de caracteres seguro
+                # Limite de caracteres seguro para o Llama 3
+                prompt_usuario = f"Texto base para o quiz: {texto_extraido[:30000]}" 
                 
                 try:
                     completion = client.chat.completions.create(
@@ -144,7 +145,7 @@ if uploaded_file is not None and api_key:
                             {"role": "user", "content": prompt_usuario}
                         ],
                         temperature=0.5,
-                        # IMPORTANTE: Força a resposta em JSON
+                        # IMPORTANTE: Força a resposta em JSON (funcionalidade nativa da Groq)
                         response_format={"type": "json_object"}
                     )
 
@@ -152,17 +153,17 @@ if uploaded_file is not None and api_key:
                     texto_resposta = completion.choices[0].message.content
                     dados_json = json.loads(texto_resposta)
                     
-                    # Groq às vezes encapsula em chaves diferentes, vamos garantir que apanhamos a lista
+                    # Garantir que apanhamos a lista correta
                     if "quiz" in dados_json:
                         lista_perguntas = dados_json["quiz"]
                     else:
-                        # Tenta encontrar a primeira lista disponível no JSON
+                        # Tenta encontrar a primeira lista disponível no JSON caso a chave mude
                         lista_perguntas = next((v for v in dados_json.values() if isinstance(v, list)), None)
 
                     if lista_perguntas:
                         st.session_state['quiz_data'] = lista_perguntas
                         
-                        # Limpar respostas antigas
+                        # Limpar respostas antigas da sessão
                         for key in list(st.session_state.keys()):
                             if key.startswith('q_'):
                                 del st.session_state[key]
@@ -199,8 +200,8 @@ if 'quiz_data' in st.session_state:
         )
         
         if escolha:
-            # Lógica para extrair a letra (A, B, C...)
-            # Assume que a opção vem como "A) Texto" ou apenas "A"
+            # Lógica robusta para extrair a letra (A, B, C...)
+            # Funciona mesmo que a IA mande "A) Texto" ou só "A"
             letra_user = escolha.split(')')[0].strip().upper() if ')' in escolha else escolha[0].upper()
             letra_correta = q['resposta_correta'].split(')')[0].strip().upper() if ')' in q['resposta_correta'] else q['resposta_correta'].strip().upper()
             
