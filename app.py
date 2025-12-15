@@ -25,7 +25,7 @@ with st.sidebar:
     # 1. Seletor de Modelo
     modelo_escolhido = st.selectbox(
         "Modelo da IA", 
-        ["gemini-2.0-flash-exp", "gemini-1.5-pro"],
+        ["gemini-2.5-flash", "gemini-2.5-pro"],
         index=0
     )
     
@@ -425,3 +425,4 @@ elif not api_key:
     st.warning("👈 Insere a API Key na barra lateral para começar.")
 else:
     st.info("📤 Carrega um ficheiro (PDF, PPTX ou DOCX) para gerar o quiz.")
+
