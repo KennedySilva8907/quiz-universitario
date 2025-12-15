@@ -1,5 +1,5 @@
 import streamlit as st
-from groq import Groq
+import google.generativeai as genai
 import pypdf
 from pptx import Presentation
 import docx2txt
@@ -8,24 +8,24 @@ import json
 # --- Configuração da Página ---
 st.set_page_config(page_title="Gerador de Quizzes Universitário", page_icon="🎓", layout="centered")
 
-st.title("🎓 Estuda com IA: Gerador de Quizzes (Groq)")
+st.title("🎓 Estuda com IA: Gerador de Quizzes (Gemini)")
 st.write("Carrega os materiais da aula e personaliza o teu teste.")
 
 # --- Barra Lateral para Configuração ---
 with st.sidebar:
     st.header("⚙️ Configurações")
     
-    # A tua chave já está aqui pré-preenchida
-    default_key = "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"
-    api_key = st.text_input("Insere a tua API Key da Groq", value=default_key, type="password")
-    st.markdown("[Obter Chave Gratuita](https://console.groq.com/keys)")
+    # A tua chave NOVA já está aqui
+    default_key = "AIzaSyDGMdOBaAIUrE827c9UhHNZLx44N-7iPJg"
+    api_key = st.text_input("Insere a tua API Key da Google", value=default_key, type="password")
+    st.markdown("[Obter Chave Gratuita](https://aistudio.google.com/app/apikey)")
     
     st.divider() 
     
-    # 1. Seletor de Modelo (Modelos rápidos da Groq)
+    # 1. Seletor de Modelo (Atualizado para as versões estáveis 1.5)
     modelo_escolhido = st.selectbox(
         "Modelo da IA", 
-        ["llama-3.3-70b-versatile", "llama3-70b-8192", "mixtral-8x7b-32768"],
+        ["gemini-1.5-flash", "gemini-1.5-pro"],
         index=0
     )
     
@@ -38,7 +38,7 @@ with st.sidebar:
     
     # 3. Tipos de Perguntas
     tipos_perguntas = st.multiselect(
-        "Tipos de Perguntas",
+        "Tipos de Perguntas (Seleciona pelo menos um)",
         ["Múltipla Escolha", "Verdadeiro ou Falso", "Associação de Colunas"],
         default=["Múltipla Escolha", "Verdadeiro ou Falso"]
     )
@@ -94,19 +94,20 @@ if uploaded_file is not None and api_key:
         
         st.info(f"📄 Ficheiro carregado! ({len(texto_extraido)} caracteres)")
         
-        # Validação
         if not tipos_perguntas:
             st.warning("⚠️ Por favor seleciona pelo menos um tipo de pergunta na barra lateral.")
         
         elif st.button("🚀 Gerar Quiz Personalizado", type="primary"):
-            with st.spinner("A IA está a criar perguntas variadas via Groq..."):
+            with st.spinner("A IA está a pensar... (Isto pode demorar uns segundos)"):
                 
-                # Inicializar Cliente Groq
-                client = Groq(api_key=api_key)
+                # Configurar Gemini
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel(modelo_escolhido)
 
-                # --- PROMPT INTELIGENTE ---
-                prompt_sistema = f"""
-                Atua como um professor universitário. Vais receber um texto e deves criar um quiz.
+                # --- PROMPT ---
+                prompt = f"""
+                Atua como um professor universitário. Cria um quiz baseado neste texto:
+                "{texto_extraido[:30000]}"
                 
                 CONFIGURAÇÕES:
                 - Quantidade: {qtd_perguntas} perguntas.
@@ -115,64 +116,53 @@ if uploaded_file is not None and api_key:
                 - Tipos permitidos: {', '.join(tipos_perguntas)}
                 
                 REGRAS DE FORMATAÇÃO:
-                1. Múltipla Escolha: {num_alternativas} opções.
+                1. Múltipla Escolha: {num_alternativas} opções (A, B, C...).
                 2. Verdadeiro/Falso: Opções ["A) Verdadeiro", "B) Falso"].
-                3. Associação: Pergunta com itens, Opções com sequências.
+                3. Associação: Pergunta com itens, Opções com sequências corretas.
                 
                 OUTPUT JSON OBRIGATÓRIO:
-                Retorna APENAS um JSON com esta estrutura exata:
-                {{
-                    "quiz": [
-                        {{
-                            "tipo": "...",
-                            "pergunta": "...",
-                            "opcoes": ["A) ...", "B) ..."],
-                            "resposta_correta": "A",
-                            "explicacao": "..."
-                        }}
-                    ]
-                }}
+                Devolve APENAS um JSON válido (sem markdown, sem ```json):
+                [
+                    {{
+                        "tipo": "Múltipla Escolha",
+                        "pergunta": "...",
+                        "opcoes": ["A) ...", "B) ..."],
+                        "resposta_correta": "A",
+                        "explicacao": "..."
+                    }}
+                ]
                 """
                 
-                # Limite de caracteres seguro para o Llama 3
-                prompt_usuario = f"Texto base para o quiz: {texto_extraido[:30000]}" 
-                
                 try:
-                    completion = client.chat.completions.create(
-                        model=modelo_escolhido,
-                        messages=[
-                            {"role": "system", "content": prompt_sistema},
-                            {"role": "user", "content": prompt_usuario}
-                        ],
-                        temperature=0.5,
-                        # IMPORTANTE: Força a resposta em JSON (funcionalidade nativa da Groq)
-                        response_format={"type": "json_object"}
+                    # Tenta forçar JSON mode (funciona nas versões mais recentes)
+                    response = model.generate_content(
+                        prompt, 
+                        generation_config={"response_mime_type": "application/json"}
                     )
-
-                    # Processar resposta
-                    texto_resposta = completion.choices[0].message.content
-                    dados_json = json.loads(texto_resposta)
                     
-                    # Garantir que apanhamos a lista correta
-                    if "quiz" in dados_json:
-                        lista_perguntas = dados_json["quiz"]
-                    else:
-                        # Tenta encontrar a primeira lista disponível no JSON caso a chave mude
-                        lista_perguntas = next((v for v in dados_json.values() if isinstance(v, list)), None)
+                    texto_resposta = response.text
+                    
+                    # Limpeza extra caso o modelo ponha Markdown
+                    texto_resposta = texto_resposta.replace("```json", "").replace("```", "")
+                    
+                    # Encontrar o início e fim da lista JSON
+                    inicio = texto_resposta.find('[')
+                    fim = texto_resposta.rfind(']') + 1
 
-                    if lista_perguntas:
-                        st.session_state['quiz_data'] = lista_perguntas
+                    if inicio != -1 and fim != 0:
+                        json_str = texto_resposta[inicio:fim]
+                        st.session_state['quiz_data'] = json.loads(json_str)
                         
-                        # Limpar respostas antigas da sessão
+                        # Limpar estados antigos
                         for key in list(st.session_state.keys()):
                             if key.startswith('q_'):
                                 del st.session_state[key]
                         st.rerun()
                     else:
-                        st.error("O formato JSON recebido não contém uma lista de perguntas válida.")
+                        st.error("Erro: A IA não devolveu um formato válido. Tenta novamente.")
 
                 except Exception as e:
-                    st.error(f"Erro na API Groq: {e}")
+                    st.error(f"Erro na API Google: {e}")
 
     except Exception as e:
         st.error(f"Erro ao ler ficheiro: {e}")
@@ -200,8 +190,7 @@ if 'quiz_data' in st.session_state:
         )
         
         if escolha:
-            # Lógica robusta para extrair a letra (A, B, C...)
-            # Funciona mesmo que a IA mande "A) Texto" ou só "A"
+            # Extração da letra (robusta)
             letra_user = escolha.split(')')[0].strip().upper() if ')' in escolha else escolha[0].upper()
             letra_correta = q['resposta_correta'].split(')')[0].strip().upper() if ')' in q['resposta_correta'] else q['resposta_correta'].strip().upper()
             
@@ -220,4 +209,4 @@ if 'quiz_data' in st.session_state:
             st.balloons()
 
 elif not api_key:
-    st.warning("👈 A API Key deve estar preenchida na barra lateral.")
+    st.warning("👈 Insere a API Key na barra lateral.")
