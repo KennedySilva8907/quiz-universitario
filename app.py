@@ -8,24 +8,23 @@ import json
 # --- Configuração da Página ---
 st.set_page_config(page_title="Gerador de Quizzes Universitário", page_icon="🎓", layout="centered")
 
-st.title("🎓 Estuda com IA: Gerador de Quizzes (Gemini)")
+st.title("🎓 Estuda com IA: Gerador de Quizzes")
 st.write("Carrega os materiais da aula e personaliza o teu teste.")
 
 # --- Barra Lateral para Configuração ---
 with st.sidebar:
     st.header("⚙️ Configurações")
     
-    # A tua chave NOVA já está aqui
-    default_key = "AIzaSyDGMdOBaAIUrE827c9UhHNZLx44N-7iPJg"
-    api_key = st.text_input("Insere a tua API Key da Google", value=default_key, type="password")
+    # --- MUDANÇA DE SEGURANÇA: Campo vazio ---
+    api_key = st.text_input("Insere a tua API Key da Google", type="password")
     st.markdown("[Obter Chave Gratuita](https://aistudio.google.com/app/apikey)")
     
     st.divider() 
     
-    # 1. Seletor de Modelo (Atualizado para as versões estáveis 1.5)
+    # 1. Seletor de Modelo
     modelo_escolhido = st.selectbox(
         "Modelo da IA", 
-        ["gemini-2.5-flash", "gemini-2.5-pro"],
+        ["gemini-1.5-flash", "gemini-1.5-pro"],
         index=0
     )
     
@@ -98,13 +97,12 @@ if uploaded_file is not None and api_key:
             st.warning("⚠️ Por favor seleciona pelo menos um tipo de pergunta na barra lateral.")
         
         elif st.button("🚀 Gerar Quiz Personalizado", type="primary"):
-            with st.spinner("A IA está a pensar... (Isto pode demorar uns segundos)"):
+            with st.spinner("A IA está a gerar as perguntas..."):
                 
-                # Configurar Gemini
                 genai.configure(api_key=api_key)
                 model = genai.GenerativeModel(modelo_escolhido)
 
-                # --- PROMPT ---
+                # --- PROMPT CORRIGIDO PARA ASSOCIAÇÃO ---
                 prompt = f"""
                 Atua como um professor universitário. Cria um quiz baseado neste texto:
                 "{texto_extraido[:30000]}"
@@ -115,17 +113,25 @@ if uploaded_file is not None and api_key:
                 - Foco: {tema_foco if tema_foco else "Geral"}.
                 - Tipos permitidos: {', '.join(tipos_perguntas)}
                 
-                REGRAS DE FORMATAÇÃO:
-                1. Múltipla Escolha: {num_alternativas} opções (A, B, C...).
-                2. Verdadeiro/Falso: Opções ["A) Verdadeiro", "B) Falso"].
-                3. Associação: Pergunta com itens, Opções com sequências corretas.
+                REGRAS DE FORMATAÇÃO ESTRITA:
+                
+                1. Múltipla Escolha: 
+                   - {num_alternativas} opções (A, B, C...).
+                
+                2. Verdadeiro/Falso: 
+                   - Opções OBRIGATÓRIAS: ["A) Verdadeiro", "B) Falso"].
+                
+                3. Associação de Colunas (IMPORTANTE):
+                   - No campo 'pergunta', tens de escrever explicitamente os itens e as definições separados por quebra de linha.
+                   - Exemplo de 'pergunta': "Associe os conceitos:\\n1. Conceito X\\n2. Conceito Y\\n\\nA. Definição 1\\nB. Definição 2".
+                   - As 'opcoes' devem ser as combinações: ["A) 1-B, 2-A", "B) 1-A, 2-B"].
                 
                 OUTPUT JSON OBRIGATÓRIO:
-                Devolve APENAS um JSON válido (sem markdown, sem ```json):
+                Devolve APENAS um JSON válido (sem markdown ```json):
                 [
                     {{
-                        "tipo": "Múltipla Escolha",
-                        "pergunta": "...",
+                        "tipo": "...",
+                        "pergunta": "Texto da pergunta aqui (com quebras de linha \\n se for associação)",
                         "opcoes": ["A) ...", "B) ..."],
                         "resposta_correta": "A",
                         "explicacao": "..."
@@ -134,18 +140,13 @@ if uploaded_file is not None and api_key:
                 """
                 
                 try:
-                    # Tenta forçar JSON mode (funciona nas versões mais recentes)
                     response = model.generate_content(
                         prompt, 
                         generation_config={"response_mime_type": "application/json"}
                     )
                     
-                    texto_resposta = response.text
+                    texto_resposta = response.text.replace("```json", "").replace("```", "")
                     
-                    # Limpeza extra caso o modelo ponha Markdown
-                    texto_resposta = texto_resposta.replace("```json", "").replace("```", "")
-                    
-                    # Encontrar o início e fim da lista JSON
                     inicio = texto_resposta.find('[')
                     fim = texto_resposta.rfind(']') + 1
 
@@ -179,6 +180,8 @@ if 'quiz_data' in st.session_state:
         tipo_label = q.get('tipo', 'Pergunta')
         st.caption(f"📌 {tipo_label}")
         
+        # --- CORREÇÃO VISUAL: Renderizar Markdown ---
+        # Isto garante que os \n (quebras de linha) da associação apareçam corretamente
         st.markdown(f"**{i+1}. {q['pergunta']}**")
         
         escolha = st.radio(
@@ -190,7 +193,6 @@ if 'quiz_data' in st.session_state:
         )
         
         if escolha:
-            # Extração da letra (robusta)
             letra_user = escolha.split(')')[0].strip().upper() if ')' in escolha else escolha[0].upper()
             letra_correta = q['resposta_correta'].split(')')[0].strip().upper() if ')' in q['resposta_correta'] else q['resposta_correta'].strip().upper()
             
@@ -209,5 +211,4 @@ if 'quiz_data' in st.session_state:
             st.balloons()
 
 elif not api_key:
-    st.warning("👈 Insere a API Key na barra lateral.")
-
+    st.warning("👈 Insere a API Key na barra lateral para começar.")
