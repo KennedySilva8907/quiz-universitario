@@ -15,7 +15,7 @@ st.write("Carrega os materiais da aula e personaliza o teu teste.")
 with st.sidebar:
     st.header("⚙️ Configurações")
     
-    # --- MUDANÇA DE SEGURANÇA: Campo vazio ---
+    # Campo de API Key (Vazio por segurança)
     api_key = st.text_input("Insere a tua API Key da Google", type="password")
     st.markdown("[Obter Chave Gratuita](https://aistudio.google.com/app/apikey)")
     
@@ -37,7 +37,7 @@ with st.sidebar:
     
     # 3. Tipos de Perguntas
     tipos_perguntas = st.multiselect(
-        "Tipos de Perguntas (Seleciona pelo menos um)",
+        "Tipos de Perguntas",
         ["Múltipla Escolha", "Verdadeiro ou Falso", "Associação de Colunas"],
         default=["Múltipla Escolha", "Verdadeiro ou Falso"]
     )
@@ -102,7 +102,7 @@ if uploaded_file is not None and api_key:
                 genai.configure(api_key=api_key)
                 model = genai.GenerativeModel(modelo_escolhido)
 
-                # --- PROMPT CORRIGIDO PARA ASSOCIAÇÃO ---
+                # --- PROMPT REFORÇADO PARA FORMATAÇÃO ---
                 prompt = f"""
                 Atua como um professor universitário. Cria um quiz baseado neste texto:
                 "{texto_extraido[:30000]}"
@@ -113,26 +113,28 @@ if uploaded_file is not None and api_key:
                 - Foco: {tema_foco if tema_foco else "Geral"}.
                 - Tipos permitidos: {', '.join(tipos_perguntas)}
                 
-                REGRAS DE FORMATAÇÃO ESTRITA:
+                REGRAS DE FORMATAÇÃO ESTRITA (LEIA COM ATENÇÃO):
                 
                 1. Múltipla Escolha: 
                    - {num_alternativas} opções (A, B, C...).
                 
                 2. Verdadeiro/Falso: 
-                   - Opções OBRIGATÓRIAS: ["A) Verdadeiro", "B) Falso"].
+                   - Opções: ["A) Verdadeiro", "B) Falso"].
                 
-                3. Associação de Colunas (IMPORTANTE):
-                   - No campo 'pergunta', tens de escrever explicitamente os itens e as definições separados por quebra de linha.
-                   - Exemplo de 'pergunta': "Associe os conceitos:\\n1. Conceito X\\n2. Conceito Y\\n\\nA. Definição 1\\nB. Definição 2".
-                   - As 'opcoes' devem ser as combinações: ["A) 1-B, 2-A", "B) 1-A, 2-B"].
+                3. Associação de Colunas (CRÍTICO):
+                   - O campo 'pergunta' DEVE ser formatado visualmente com quebras de linha duplas.
+                   - Estrutura OBRIGATÓRIA da string 'pergunta':
+                     "Associe os itens abaixo:\\n\\n1. Item Um\\n2. Item Dois\\n3. Item Três\\n\\nA. Definição A\\nB. Definição B\\nC. Definição C"
+                   - NUNCA coloque as definições na mesma linha (Ex: NÃO FAÇA "A. ... B. ...").
+                   - Use '\\n' para forçar a lista vertical.
                 
                 OUTPUT JSON OBRIGATÓRIO:
-                Devolve APENAS um JSON válido (sem markdown ```json):
+                Devolve APENAS um JSON válido:
                 [
                     {{
                         "tipo": "...",
-                        "pergunta": "Texto da pergunta aqui (com quebras de linha \\n se for associação)",
-                        "opcoes": ["A) ...", "B) ..."],
+                        "pergunta": "Texto da pergunta formatado com \\n",
+                        "opcoes": ["A) 1-B, 2-A...", "B) ..."],
                         "resposta_correta": "A",
                         "explicacao": "..."
                     }}
@@ -180,8 +182,7 @@ if 'quiz_data' in st.session_state:
         tipo_label = q.get('tipo', 'Pergunta')
         st.caption(f"📌 {tipo_label}")
         
-        # --- CORREÇÃO VISUAL: Renderizar Markdown ---
-        # Isto garante que os \n (quebras de linha) da associação apareçam corretamente
+        # O st.markdown vai interpretar os \n que pedimos à IA
         st.markdown(f"**{i+1}. {q['pergunta']}**")
         
         escolha = st.radio(
@@ -212,4 +213,3 @@ if 'quiz_data' in st.session_state:
 
 elif not api_key:
     st.warning("👈 Insere a API Key na barra lateral para começar.")
-
