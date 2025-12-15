@@ -4,6 +4,7 @@ import pypdf
 from pptx import Presentation
 import docx2txt
 import json
+import re
 
 # --- Configuração da Página ---
 st.set_page_config(page_title="Gerador de Quizzes Universitário", page_icon="🎓", layout="centered")
@@ -102,7 +103,7 @@ if uploaded_file is not None and api_key:
                 genai.configure(api_key=api_key)
                 model = genai.GenerativeModel(modelo_escolhido)
 
-                # --- PROMPT REFORÇADO PARA FORMATAÇÃO ---
+                # --- PROMPT BLINDADO ---
                 prompt = f"""
                 Atua como um professor universitário. Cria um quiz baseado neste texto:
                 "{texto_extraido[:30000]}"
@@ -113,28 +114,27 @@ if uploaded_file is not None and api_key:
                 - Foco: {tema_foco if tema_foco else "Geral"}.
                 - Tipos permitidos: {', '.join(tipos_perguntas)}
                 
-                REGRAS DE FORMATAÇÃO ESTRITA (LEIA COM ATENÇÃO):
+                REGRAS DE FORMATAÇÃO ESTRITA:
                 
                 1. Múltipla Escolha: 
-                   - {num_alternativas} opções (A, B, C...).
+                   - {num_alternativas} opções.
                 
                 2. Verdadeiro/Falso: 
                    - Opções: ["A) Verdadeiro", "B) Falso"].
                 
-                3. Associação de Colunas (CRÍTICO):
-                   - O campo 'pergunta' DEVE ser formatado visualmente com quebras de linha duplas.
-                   - Estrutura OBRIGATÓRIA da string 'pergunta':
-                     "Associe os itens abaixo:\\n\\n1. Item Um\\n2. Item Dois\\n3. Item Três\\n\\nA. Definição A\\nB. Definição B\\nC. Definição C"
-                   - NUNCA coloque as definições na mesma linha (Ex: NÃO FAÇA "A. ... B. ...").
-                   - Use '\\n' para forçar a lista vertical.
+                3. Associação de Colunas (MUITO IMPORTANTE):
+                   - No campo 'pergunta', tens de criar uma LISTA VERTICAL.
+                   - Usa DUAS quebras de linha (\\n\\n) entre cada item numérico e cada item alfabético.
+                   - Exemplo OBRIGATÓRIO para o campo 'pergunta':
+                     "Associe os termos:\\n\\n1. Termo A\\n\\n2. Termo B\\n\\n--- Separador ---\\n\\nA. Definição X\\n\\nB. Definição Y"
                 
                 OUTPUT JSON OBRIGATÓRIO:
                 Devolve APENAS um JSON válido:
                 [
                     {{
                         "tipo": "...",
-                        "pergunta": "Texto da pergunta formatado com \\n",
-                        "opcoes": ["A) 1-B, 2-A...", "B) ..."],
+                        "pergunta": "Texto da pergunta formatado...",
+                        "opcoes": ["A) ...", "B) ..."],
                         "resposta_correta": "A",
                         "explicacao": "..."
                     }}
@@ -182,8 +182,20 @@ if 'quiz_data' in st.session_state:
         tipo_label = q.get('tipo', 'Pergunta')
         st.caption(f"📌 {tipo_label}")
         
-        # O st.markdown vai interpretar os \n que pedimos à IA
-        st.markdown(f"**{i+1}. {q['pergunta']}**")
+        # --- TRUQUE DE FORMATAÇÃO (O "FIX" FINAL) ---
+        texto_pergunta = q['pergunta']
+        
+        # Se for Associação, vamos forçar quebras de linha visualmente
+        if "Associação" in tipo_label or "Associe" in texto_pergunta:
+            # Substitui "A. " por "\n\nA. " se estiver colado, para garantir a lista
+            # Regex procura por Letra maiúscula seguida de ponto e espaço, precedida de espaço ou nada
+            texto_pergunta = texto_pergunta.replace(". ", ".<br>") # Quebra suave HTML
+            texto_pergunta = texto_pergunta.replace("\n", "<br>")  # Garante que \n vira quebra HTML
+        
+        # Usamos unsafe_allow_html=True para garantir que os <br> funcionam se o Markdown falhar
+        st.markdown(f"**{i+1}. {q['pergunta']}**") 
+        # Nota: Mantive o markdown original acima, mas se quiseres forçar HTML usa:
+        # st.markdown(f"**{i+1}.** <br>{texto_pergunta}", unsafe_allow_html=True)
         
         escolha = st.radio(
             "A tua resposta:", 
