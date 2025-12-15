@@ -25,7 +25,7 @@ with st.sidebar:
     # 1. Seletor de Modelo
     modelo_escolhido = st.selectbox(
         "Modelo da IA", 
-        ["gemini-2.5-flash", "gemini-2.5-pro"],
+        ["gemini-2.0-flash-exp", "gemini-1.5-pro"],
         index=0
     )
     
@@ -96,6 +96,64 @@ def extrair_letra(texto):
     
     return None
 
+# --- Função para formatar blocos SQL ---
+def formatar_pergunta_sql(texto):
+    """Formata perguntas que contêm código SQL de forma legível"""
+    
+    # Padrão 1: Blocos com ```sql ou ```
+    if '```' in texto:
+        partes = []
+        blocos = texto.split('```')
+        
+        for idx, bloco in enumerate(blocos):
+            if idx % 2 == 0:
+                # Texto normal
+                if bloco.strip():
+                    partes.append(('texto', bloco.strip()))
+            else:
+                # Código
+                codigo = re.sub(r'^(sql|python|java|javascript|c\+\+|c#)\s*\n', '', bloco, flags=re.IGNORECASE)
+                partes.append(('codigo', codigo.strip()))
+        
+        return partes
+    
+    # Padrão 2: Blocos com palavras-chave SQL sem marcadores
+    # Detecta CREATE, SELECT, INSERT, etc. e formata automaticamente
+    sql_keywords = r'\b(CREATE|SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|FROM|WHERE|JOIN|GROUP BY|ORDER BY|HAVING)\b'
+    
+    if re.search(sql_keywords, texto, re.IGNORECASE):
+        # Tenta separar texto descritivo de código SQL
+        linhas = texto.split('\n')
+        partes = []
+        bloco_sql = []
+        bloco_texto = []
+        
+        for linha in linhas:
+            # Se a linha tem SQL keywords, é código
+            if re.search(sql_keywords, linha, re.IGNORECASE):
+                # Guarda texto acumulado
+                if bloco_texto:
+                    partes.append(('texto', '\n'.join(bloco_texto).strip()))
+                    bloco_texto = []
+                bloco_sql.append(linha)
+            else:
+                # Guarda SQL acumulado
+                if bloco_sql:
+                    partes.append(('codigo', '\n'.join(bloco_sql).strip()))
+                    bloco_sql = []
+                bloco_texto.append(linha)
+        
+        # Adiciona blocos finais
+        if bloco_texto:
+            partes.append(('texto', '\n'.join(bloco_texto).strip()))
+        if bloco_sql:
+            partes.append(('codigo', '\n'.join(bloco_sql).strip()))
+        
+        return partes if len(partes) > 1 else [('texto', texto)]
+    
+    # Sem SQL, retorna como texto normal
+    return [('texto', texto)]
+
 # --- Lógica Principal ---
 st.subheader("1. Carregar Material")
 uploaded_file = st.file_uploader("Arrasta o teu ficheiro aqui", type=['pdf', 'pptx', 'docx'])
@@ -127,67 +185,73 @@ if uploaded_file is not None and api_key:
                 genai.configure(api_key=api_key)
                 model = genai.GenerativeModel(modelo_escolhido)
 
-                # --- PROMPT MELHORADO ---
+                # --- PROMPT CORRIGIDO (FORÇA O NÚMERO EXATO) ---
                 prompt = f"""
                 Atua como um professor universitário experiente. Cria um quiz rigoroso baseado neste conteúdo:
                 
                 CONTEÚDO DO MATERIAL:
                 "{texto_extraido[:30000]}"
                 
-                CONFIGURAÇÕES DO QUIZ:
-                - Quantidade: {qtd_perguntas} perguntas
+                ⚠️ CONFIGURAÇÕES OBRIGATÓRIAS DO QUIZ:
+                - Quantidade: EXATAMENTE {qtd_perguntas} perguntas (nem mais, nem menos)
                 - Dificuldade: {dificuldade}
                 - Foco específico: {tema_foco if tema_foco else "Todos os tópicos do material"}
-                - Tipos de perguntas: {', '.join(tipos_perguntas)}
+                - Tipos de perguntas permitidos: {', '.join(tipos_perguntas)}
                 
-                REGRAS OBRIGATÓRIAS:
+                📋 REGRAS DE FORMATAÇÃO:
                 
                 1. **Múltipla Escolha**:
-                   - Cria {num_alternativas} opções no formato: "A) texto", "B) texto", etc.
-                   - A resposta_correta deve ser APENAS a letra: "A", "B", "C", etc.
-                   - Se a pergunta incluir código SQL, tabelas ou dados, INCLUI TUDO no campo 'pergunta'
-                   - Exemplo de pergunta com SQL:
-                     "Dadas as tabelas:\\n\\nEquipas: (idEquipa, nome)\\nJogadores: (id, nome, equipa_id)\\n\\nQual o resultado de:\\n```sql\\nSELECT * FROM Equipas\\n```"
-                
+                   - {num_alternativas} opções no formato: "A) texto", "B) texto", etc.
+                   - resposta_correta: APENAS a letra (ex: "A")
+                   
                 2. **Verdadeiro/Falso**:
                    - Opções: ["A) Verdadeiro", "B) Falso"]
                    - resposta_correta: "A" ou "B"
                 
                 3. **Associação de Colunas**:
-                   - Formato da pergunta: "Associe os itens:\\n\\n1. Item Um\\n2. Item Dois\\n3. Item Três\\n\\n--- Separador ---\\n\\nA. Definição A\\nB. Definição B\\nC. Definição C"
-                   - Opções: ["A) 1-A, 2-B, 3-C", "B) 1-B, 2-A, 3-C", ...]
-                   - resposta_correta: apenas a letra da opção correta
+                   - Formato: "Associe:\\n\\n1. Item\\n2. Item\\n\\n--- Separador ---\\n\\nA. Definição\\nB. Definição"
+                   - Opções com combinações possíveis
+                   - resposta_correta: letra da combinação correta
                 
-                4. **IMPORTANTE SOBRE CONTEXTO**:
-                   - Se a pergunta precisar de tabelas, dados de exemplo ou código para ser respondida, INCLUI TUDO no campo 'pergunta'
-                   - Nunca assumas que o aluno tem acesso ao material original durante o teste
-                   - Cada pergunta deve ser autocontida e completa
+                🔴 REGRA CRÍTICA PARA CÓDIGO SQL/PROGRAMAÇÃO:
+                - Coloca TODO o código SQL entre marcadores ```sql e ```
+                - Exemplo correto:
+                  "Considere a tabela:\\n\\n```sql\\nCREATE TABLE Equipas (...)\\n```\\n\\nQual o resultado?"
+                - NUNCA mistures código SQL com texto sem os marcadores ```
                 
-                5. **Formato da Explicação**:
-                   - Deve ser clara e educativa
-                   - Se for código/SQL, explica o que acontece passo a passo
+                📊 IMPORTANTE SOBRE CONTEXTO:
+                - Cada pergunta deve ser AUTOCONTIDA
+                - Se precisar de tabelas/dados/código, INCLUI TUDO no campo 'pergunta'
+                - O aluno NÃO tem acesso ao material durante o teste
+                - Usa \\n para quebras de linha dentro do JSON
                 
-                FORMATO JSON OBRIGATÓRIO (devolve APENAS isto, sem texto adicional):
+                ✅ VALIDAÇÃO OBRIGATÓRIA ANTES DE RESPONDER:
+                1. Conta as perguntas: devem ser EXATAMENTE {qtd_perguntas}
+                2. Verifica se cada 'resposta_correta' é uma letra simples (A, B, C...)
+                3. Verifica se todo código SQL está entre ```sql e ```
+                4. Verifica se o JSON é válido
+                
+                FORMATO JSON (retorna APENAS isto):
                 [
                     {{
-                        "tipo": "Múltipla Escolha" ou "Verdadeiro ou Falso" ou "Associação de Colunas",
-                        "pergunta": "Texto completo da pergunta com TODOS os dados necessários",
-                        "opcoes": ["A) opção1", "B) opção2", ...],
+                        "tipo": "Múltipla Escolha",
+                        "pergunta": "Texto com código formatado:\\n\\n```sql\\nSELECT * FROM tabela\\n```\\n\\nO que retorna?",
+                        "opcoes": ["A) opção1", "B) opção2", "C) opção3", "D) opção4"],
                         "resposta_correta": "A",
-                        "explicacao": "Explicação detalhada da resposta correta"
+                        "explicacao": "Explicação detalhada"
                     }}
                 ]
                 
-                VALIDAÇÃO FINAL:
-                - Verifica se todas as perguntas têm 'resposta_correta' como uma letra simples (A, B, C, etc.)
-                - Verifica se todas as perguntas incluem TODOS os dados necessários para serem respondidas
-                - Verifica se o JSON está válido e bem formatado
+                ⚠️ LEMBRA-TE: Devolve EXATAMENTE {qtd_perguntas} perguntas no array JSON!
                 """
                 
                 try:
                     response = model.generate_content(
-                        prompt, 
-                        generation_config={"response_mime_type": "application/json"}
+                        prompt,
+                        generation_config={
+                            "response_mime_type": "application/json",
+                            "temperature": 0.7,  # Criatividade moderada
+                        }
                     )
                     
                     texto_resposta = response.text.replace("```json", "").replace("```", "").strip()
@@ -199,13 +263,25 @@ if uploaded_file is not None and api_key:
                         json_str = texto_resposta[inicio:fim]
                         quiz_data = json.loads(json_str)
                         
+                        # ✅ VALIDAÇÃO E CORREÇÃO DO NÚMERO DE PERGUNTAS
+                        if len(quiz_data) > qtd_perguntas:
+                            quiz_data = quiz_data[:qtd_perguntas]
+                            st.warning(f"⚠️ A IA gerou {len(quiz_data)} perguntas. Foram cortadas para {qtd_perguntas}.")
+                        elif len(quiz_data) < qtd_perguntas:
+                            st.warning(f"⚠️ A IA gerou apenas {len(quiz_data)} perguntas (pediste {qtd_perguntas}). Tenta novamente ou reduz o número.")
+                        
                         # Validação e limpeza dos dados
                         quiz_limpo = []
                         for q in quiz_data:
                             # Garante que todos os campos existem
                             if all(key in q for key in ['tipo', 'pergunta', 'opcoes', 'resposta_correta', 'explicacao']):
-                                # Limpa a resposta_correta para garantir que é só a letra
+                                # Limpa a resposta_correta
                                 q['resposta_correta'] = extrair_letra(q['resposta_correta']) or "A"
+                                
+                                # Garante que opcoes é uma lista
+                                if not isinstance(q['opcoes'], list):
+                                    continue
+                                
                                 quiz_limpo.append(q)
                         
                         if quiz_limpo:
@@ -213,30 +289,33 @@ if uploaded_file is not None and api_key:
                             
                             # Limpar estados antigos
                             for key in list(st.session_state.keys()):
-                                if key.startswith('q_'):
+                                if key.startswith('q_') or key.startswith('respondido_'):
                                     del st.session_state[key]
+                            
+                            st.success(f"✅ Quiz gerado com {len(quiz_limpo)} perguntas!")
                             st.rerun()
                         else:
-                            st.error("❌ Erro: Nenhuma pergunta válida foi gerada. Tenta novamente.")
+                            st.error("❌ Nenhuma pergunta válida foi gerada. Tenta novamente.")
                     else:
-                        st.error("❌ Erro: A IA não devolveu um formato JSON válido. Tenta novamente.")
+                        st.error("❌ A IA não devolveu JSON válido. Tenta novamente.")
 
                 except json.JSONDecodeError as e:
                     st.error(f"❌ Erro ao processar JSON: {e}")
-                    with st.expander("Ver resposta da IA (debug)"):
+                    with st.expander("🔍 Ver resposta da IA (debug)"):
                         st.code(texto_resposta)
                 except Exception as e:
-                    st.error(f"❌ Erro na API Google: {e}")
+                    st.error(f"❌ Erro na API: {e}")
 
     except Exception as e:
         st.error(f"❌ Erro ao ler ficheiro: {e}")
 
-# --- Mostrar o Quiz ---
+# --- MOSTRAR O QUIZ (FORMATAÇÃO CORRIGIDA) ---
 if 'quiz_data' in st.session_state:
     st.markdown("---")
     st.subheader(f"📝 Quiz Gerado ({len(st.session_state['quiz_data'])} Perguntas)")
     
     respostas_certas = 0
+    respostas_dadas = 0
     total = len(st.session_state['quiz_data'])
     
     for i, q in enumerate(st.session_state['quiz_data']):
@@ -244,42 +323,44 @@ if 'quiz_data' in st.session_state:
         
         # Container para cada pergunta
         with st.container():
-            st.markdown(f"### Pergunta {i+1}")
-            st.caption(f"📌 Tipo: {tipo_label}")
+            st.markdown(f"### 📌 Pergunta {i+1} de {total}")
+            st.caption(f"Tipo: {tipo_label}")
             
-            # Formatar a pergunta dependendo do tipo
+            # --- FORMATAÇÃO MELHORADA ---
             texto_pergunta = q['pergunta']
             
-            # Detecta se tem código SQL ou blocos de código
-            if '```' in texto_pergunta or 'SELECT' in texto_pergunta.upper() or 'FROM' in texto_pergunta.upper():
-                # Separa texto normal de código
-                partes = texto_pergunta.split('```')
-                for idx, parte in enumerate(partes):
-                    if idx % 2 == 0:
-                        # Texto normal
-                        st.markdown(parte)
-                    else:
-                        # Código
-                        # Remove identificador de linguagem se houver (sql, python, etc)
-                        codigo = re.sub(r'^(sql|python|java|javascript)\n', '', parte, flags=re.IGNORECASE)
-                        st.code(codigo.strip(), language='sql')
-            
-            # Se for associação, formata em colunas
-            elif "Associação" in tipo_label or "Associe" in texto_pergunta or "--- Separador ---" in texto_pergunta:
+            # 🔧 CORREÇÃO: Formata SQL automaticamente
+            if "Associação" in tipo_label or "Associe" in texto_pergunta:
+                # Perguntas de associação
                 if "--- Separador ---" in texto_pergunta:
                     partes = texto_pergunta.split("--- Separador ---")
                     col1, col2 = st.columns(2)
                     with col1:
                         st.markdown("**Coluna 1:**")
-                        st.markdown(partes[0].replace("\\n", "\n"))
+                        # Processa cada coluna separadamente
+                        for parte_col1 in formatar_pergunta_sql(partes[0]):
+                            if parte_col1[0] == 'codigo':
+                                st.code(parte_col1[1], language='sql')
+                            else:
+                                st.markdown(parte_col1[1])
                     with col2:
                         st.markdown("**Coluna 2:**")
-                        st.markdown(partes[1].replace("\\n", "\n"))
+                        for parte_col2 in formatar_pergunta_sql(partes[1]):
+                            if parte_col2[0] == 'codigo':
+                                st.code(parte_col2[1], language='sql')
+                            else:
+                                st.markdown(parte_col2[1])
                 else:
                     st.markdown(texto_pergunta.replace("\\n", "\n"))
             else:
-                # Pergunta normal
-                st.markdown(texto_pergunta.replace("\\n", "\n"))
+                # Perguntas normais ou com SQL
+                partes_formatadas = formatar_pergunta_sql(texto_pergunta)
+                
+                for tipo_parte, conteudo in partes_formatadas:
+                    if tipo_parte == 'codigo':
+                        st.code(conteudo, language='sql')
+                    else:
+                        st.markdown(conteudo)
             
             # Opções de resposta
             escolha = st.radio(
@@ -291,45 +372,56 @@ if 'quiz_data' in st.session_state:
             
             # Verificação da resposta
             if escolha:
+                # Marca como respondida
+                if f'respondido_{i}' not in st.session_state:
+                    st.session_state[f'respondido_{i}'] = True
+                
                 letra_user = extrair_letra(escolha)
                 letra_correta = extrair_letra(q.get('resposta_correta', ''))
                 
-                if letra_user and letra_correta and letra_user == letra_correta:
-                    st.success(f"✅ **Correto!**")
-                    st.info(f"💡 {q.get('explicacao', 'Sem explicação disponível.')}")
-                    respostas_certas += 1
-                elif letra_user and letra_correta:
-                    st.error(f"❌ **Errado.** A resposta correta era: **{letra_correta}**")
-                    st.info(f"💡 {q.get('explicacao', 'Sem explicação disponível.')}")
+                if letra_user and letra_correta:
+                    if letra_user == letra_correta:
+                        st.success(f"✅ **Correto!**")
+                        st.info(f"💡 **Explicação:** {q.get('explicacao', 'Sem explicação.')}")
+                        respostas_certas += 1
+                    else:
+                        st.error(f"❌ **Errado.** A resposta correta era: **{letra_correta})**")
+                        st.info(f"💡 **Explicação:** {q.get('explicacao', 'Sem explicação.')}")
+                    
+                    respostas_dadas += 1
                 else:
-                    st.warning("⚠️ Erro ao processar a resposta. Por favor reporta este bug.")
+                    st.warning("⚠️ Erro ao processar resposta.")
             
             st.markdown("---")
 
     # Resultado final
     if total > 0:
-        percentagem = (respostas_certas / total) * 100
+        percentagem = (respostas_certas / total) * 100 if respostas_dadas == total else 0
         
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Respostas Certas", f"{respostas_certas}")
+            st.metric("✅ Certas", f"{respostas_certas}/{total}")
         with col2:
-            st.metric("Total de Perguntas", f"{total}")
+            st.metric("📊 Percentagem", f"{percentagem:.0f}%")
         with col3:
-            st.metric("Percentagem", f"{percentagem:.1f}%")
+            if respostas_dadas == total:
+                if percentagem >= 70:
+                    st.metric("🎯 Resultado", "Aprovado")
+                else:
+                    st.metric("📚 Resultado", "Estuda Mais")
         
-        if respostas_certas == total:
-            st.balloons()
-            st.success("🎉 **Parabéns! Acertaste todas!**")
-        elif percentagem >= 70:
-            st.success("👏 **Bom trabalho!**")
-        elif percentagem >= 50:
-            st.info("📚 **Continua a estudar!**")
-        else:
-            st.warning("💪 **Não desistas! Revê a matéria e tenta novamente.**")
+        if respostas_dadas == total:
+            if respostas_certas == total:
+                st.balloons()
+                st.success("🎉 **PERFEITO! Acertaste todas!**")
+            elif percentagem >= 70:
+                st.success("👏 **Bom trabalho! Passaste!**")
+            elif percentagem >= 50:
+                st.info("📚 **Razoável. Revê alguns tópicos.**")
+            else:
+                st.warning("💪 **Continua a estudar! Vais conseguir!**")
 
 elif not api_key:
     st.warning("👈 Insere a API Key na barra lateral para começar.")
 else:
     st.info("📤 Carrega um ficheiro (PDF, PPTX ou DOCX) para gerar o quiz.")
-
